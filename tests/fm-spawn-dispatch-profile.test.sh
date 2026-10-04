@@ -1648,6 +1648,82 @@ test_claude_permission_mode_invalid_refuses_before_endpoint_or_metadata() {
   pass "an unrecognized config/claude-permission-mode token refuses before any endpoint or metadata"
 }
 
+# config/claude-worker-plugins (bin/fm-spawn.sh header): absent leaves the
+# launch byte-identical, valid ids land in the inline settings JSON,
+# malformed lines refuse before any endpoint or metadata.
+test_claude_worker_plugins_absent_leaves_launch_unchanged() {
+  local rec id out status launch expected
+  id=wplug-absent-z30
+  rec=$(make_spawn_case wplug-absent claude "$id")
+  read_case_record "$rec"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "claude spawn without claude-worker-plugins should succeed"
+  launch=$(cat "$LAUNCH_LOG")
+  expected=$(claude_expected_launch "$launch" "$HOME_DIR" "$id" --dangerously-skip-permissions)
+  [ "$launch" = "$expected" ] || fail "absent claude-worker-plugins changed the launch"$'\n'"expected: $expected"$'\n'"actual:   $launch"
+  assert_not_contains "$launch" "enabledPlugins" "absent file must not add enabledPlugins"
+  pass "absent config/claude-worker-plugins launches exactly as today"
+}
+
+test_claude_worker_plugins_land_in_inline_settings() {
+  local rec id out status launch
+  id=wplug-merge-z31
+  rec=$(make_spawn_case wplug-merge claude "$id")
+  read_case_record "$rec"
+  printf '# analytics plugins\n\n  databricks@claude-plugins-official  \negg-databricks@chanon-local\n' > "$HOME_DIR/config/claude-worker-plugins"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "claude spawn with claude-worker-plugins should succeed"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "--settings '{\"feedbackDrafts\":\"off\",\"attribution\":{\"commit\":\"\",\"pr\":\"\",\"sessionUrl\":false},\"enabledPlugins\":{\"databricks@claude-plugins-official\":true,\"egg-databricks@chanon-local\":true}}'" "plugin ids did not reach the inline settings JSON"
+  pass "config/claude-worker-plugins adds ids to the inline settings, ignoring comments and blanks"
+
+  id=wplug-scout-z32
+  rec=$(make_spawn_case wplug-scout claude "$id")
+  read_case_record "$rec"
+  printf 'databricks@claude-plugins-official\n' > "$HOME_DIR/config/claude-worker-plugins"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --scout)
+  expect_code 0 "$?" "claude scout spawn with claude-worker-plugins should succeed"
+  assert_contains "$(cat "$LAUNCH_LOG")" '"enabledPlugins":{"databricks@claude-plugins-official":true}' "scout launch did not carry the plugin ids"
+  pass "config/claude-worker-plugins reaches scout launches too"
+}
+
+test_claude_worker_plugins_malformed_line_refuses() {
+  local rec id out status
+  id=wplug-bad-z33
+  rec=$(make_spawn_case wplug-bad claude "$id")
+  read_case_record "$rec"
+  printf 'databricks@claude-plugins-official\nnot a plugin\n' > "$HOME_DIR/config/claude-worker-plugins"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 1 "$status" "a malformed claude-worker-plugins line must refuse the spawn"
+  assert_contains "$out" "config/claude-worker-plugins line 2" "refusal must name the file and line"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a malformed plugin list must launch nothing"
+  assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
+  pass "a malformed config/claude-worker-plugins line refuses the spawn"
+}
+
+test_non_claude_harness_ignores_claude_worker_plugins() {
+  local rec id out status
+  id=wplug-codex-z34
+  rec=$(make_spawn_case wplug-codex codex "$id")
+  read_case_record "$rec"
+  printf 'not a plugin\n' > "$HOME_DIR/config/claude-worker-plugins"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --harness codex)
+  status=$?
+  expect_code 0 "$status" "codex spawn must ignore claude-worker-plugins"
+  assert_not_contains "$(cat "$LAUNCH_LOG")" "enabledPlugins" "plugins must not leak into a codex launch"
+  pass "config/claude-worker-plugins is ignored by non-Claude harnesses"
+}
+
+test_claude_worker_plugins_is_not_inherited() {
+  case " $(. "$ROOT/bin/fm-config-inherit-lib.sh"; fm_config_inherit_items) " in
+  *" claude-worker-plugins "*) fail "claude-worker-plugins must not be an inherited config item" ;;
+  esac
+  pass "config/claude-worker-plugins is not inherited into secondmate homes"
+}
+
 test_non_claude_harness_ignores_claude_permission_mode() {
   local rec id out status launch
   id=permmode-codex-z23
@@ -1714,6 +1790,11 @@ test_claude_permission_mode_auto_swaps_only_the_permission_flag
 test_claude_permission_mode_auto_reaches_scout_launch
 test_claude_permission_mode_invalid_refuses_before_endpoint_or_metadata
 test_non_claude_harness_ignores_claude_permission_mode
+test_claude_worker_plugins_absent_leaves_launch_unchanged
+test_claude_worker_plugins_land_in_inline_settings
+test_claude_worker_plugins_malformed_line_refuses
+test_non_claude_harness_ignores_claude_worker_plugins
+test_claude_worker_plugins_is_not_inherited
 test_non_claude_harness_ignores_config_dir
 test_claude_task_launch_carries_control_channel_authority
 test_claude_secondmate_launch_omits_task_control_channel_authority
