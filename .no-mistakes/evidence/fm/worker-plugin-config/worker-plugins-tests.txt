@@ -1,0 +1,7 @@
+ok - absent config/claude-worker-plugins launches exactly as today
+ok - config/claude-worker-plugins adds ids to the inline settings, ignoring comments and blanks
+ok - config/claude-worker-plugins reaches scout launches too
+ok - a malformed config/claude-worker-plugins line refuses the spawn
+ok - config/claude-worker-plugins is ignored by non-Claude harnesses
+ok - config/claude-worker-plugins is not inherited into secondmate homes
+# all fm-spawn-dispatch-profile tests passed
